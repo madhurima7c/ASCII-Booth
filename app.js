@@ -66,6 +66,32 @@
   let asciiLiveFitKey = "";
   /** Prevent overlapping getUserMedia prompts (race on slow mobile). */
   let cameraStartPromise = null;
+  /**
+   * Apply horizontal flip when sampling video into canvas (selfie parity).
+   * iPhone/iPad front-camera buffers are usually already mirrored; flipping
+   * again makes the frozen capture / download differ from the live ASCII.
+   */
+  let flipVideoSampleX = true;
+
+  function isLikelyAppleMobileDevice() {
+    const ua = navigator.userAgent || "";
+    if (/iPhone|iPod|iPad/i.test(ua)) return true;
+    if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) {
+      return true;
+    }
+    return false;
+  }
+
+  function refreshVideoSampleMirror() {
+    flipVideoSampleX = true;
+    if (!stream || !isLikelyAppleMobileDevice()) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track || typeof track.getSettings !== "function") return;
+    const settings = track.getSettings();
+    if (settings.facingMode === "environment") return;
+    /* user, or omitted on Safari (still front selfie for this app) */
+    flipVideoSampleX = false;
+  }
 
   function getAsciiCellRatioWH() {
     if (cachedCellRatioWH !== null) {
@@ -276,6 +302,7 @@
     stableVideoW = 0;
     stableVideoH = 0;
     asciiLiveFitKey = "";
+    flipVideoSampleX = true;
   }
 
   /**
@@ -558,12 +585,6 @@
       if (cameraOn) startLiveLoop();
       return;
     }
-    const url = buildAsciiPngDataUrl();
-    if (!url) {
-      btnCapture.disabled = false;
-      if (cameraOn) startLiveLoop();
-      return;
-    }
     syncCaptureViewfinderTheme();
     if (captureAsciiOut) {
       captureAsciiOut.innerHTML = asciiOut.innerHTML;
@@ -576,29 +597,30 @@
         lastRows
       );
     }
-    let flipInDone = false;
-    function finishFlipIn() {
-      if (flipInDone) return;
-      flipInDone = true;
-      requestAnimationFrame(function () {
-        requestAnimationFrame(function () {
-          if (viewfinderFlipRoot) {
-            viewfinderFlipRoot.classList.add("is-flipped");
-          }
-          if (boothStack) {
-            boothStack.classList.add("is-capture-back");
-          }
-          if (btnDownloadCapture) {
-            btnDownloadCapture.href = url;
-          }
-          viewfinderShowingPhoto = true;
-          btnCapture.textContent = "Retake";
-          btnCapture.setAttribute("aria-label", "Return to live camera");
-          btnCapture.disabled = false;
-        });
-      });
+
+    if (viewfinderFlipRoot) {
+      viewfinderFlipRoot.classList.add("is-flipped");
     }
-    finishFlipIn();
+    if (boothStack) {
+      boothStack.classList.add("is-capture-back");
+    }
+    if (btnDownloadCapture) {
+      btnDownloadCapture.setAttribute("href", "#");
+    }
+    viewfinderShowingPhoto = true;
+    btnCapture.textContent = "Retake";
+    btnCapture.setAttribute("aria-label", "Return to live camera");
+    btnCapture.disabled = false;
+
+    queueMicrotask(function () {
+      var url = "";
+      try {
+        url = buildAsciiPngDataUrl();
+      } catch (e) {}
+      if (btnDownloadCapture && url) {
+        btnDownloadCapture.href = url;
+      }
+    });
   }
 
   function flipBackToLive() {
@@ -659,8 +681,10 @@
       sy = (vh - sh) / 2;
     }
     ctx.save();
-    ctx.translate(dw, 0);
-    ctx.scale(-1, 1);
+    if (flipVideoSampleX) {
+      ctx.translate(dw, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
     ctx.restore();
   }
@@ -756,6 +780,7 @@
     lastCols = 0;
     lastRows = 0;
     asciiLiveFitKey = "";
+    refreshVideoSampleMirror();
     startLiveLoop();
     return true;
   }
@@ -811,6 +836,7 @@
         btnCapture.disabled = false;
         lastCols = 0;
         lastRows = 0;
+        refreshVideoSampleMirror();
         startLiveLoop();
         return true;
       } catch (err) {
