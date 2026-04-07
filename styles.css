@@ -391,6 +391,12 @@ body {
   object-fit: cover;
 }
 
+/* iOS front cam buffer is already mirrored; canvas skips flip — cancel 3D back-face parity. */
+html.ascii-booth-ios-selfie .viewfinder-face--back .viewfinder-ascii {
+  transform: scaleX(-1);
+  transform-origin: center center;
+}
+
 .viewfinder-inner {
   position: absolute;
   left: var(--frame-mat-inset);

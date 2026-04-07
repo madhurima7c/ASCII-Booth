@@ -63,6 +63,41 @@
   let asciiLiveFitKey = "";
   /** Prevent overlapping getUserMedia prompts (race on slow mobile). */
   let cameraStartPromise = null;
+  /** Desktop path: ignore tiny intrinsic-size jitter from mobile cameras. */
+  let stableVideoW = 0;
+  let stableVideoH = 0;
+  /**
+   * Horizontal flip when drawing video to canvas. iOS front camera buffers are
+   * usually already mirrored; flipping again breaks capture vs live.
+   */
+  let flipVideoSampleX = true;
+
+  const mqlNarrowViewport = window.matchMedia("(max-width: 700px)");
+
+  function isNarrowViewport() {
+    return mqlNarrowViewport.matches;
+  }
+
+  function isLikelyAppleTouchDevice() {
+    const ua = navigator.userAgent || "";
+    if (/iPhone|iPod|iPad/i.test(ua)) return true;
+    if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) {
+      return true;
+    }
+    return false;
+  }
+
+  function refreshIosMirrorState() {
+    flipVideoSampleX = true;
+    document.documentElement.classList.remove("ascii-booth-ios-selfie");
+    if (!stream || !isLikelyAppleTouchDevice()) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track || typeof track.getSettings !== "function") return;
+    const settings = track.getSettings();
+    if (settings.facingMode === "environment") return;
+    flipVideoSampleX = false;
+    document.documentElement.classList.add("ascii-booth-ios-selfie");
+  }
 
   function getAsciiCellRatioWH() {
     if (cachedCellRatioWH !== null) {
@@ -271,11 +306,15 @@
     btnCapture.textContent = "Capture";
     btnCapture.setAttribute("aria-label", "Capture ASCII portrait");
     asciiLiveFitKey = "";
+    stableVideoW = 0;
+    stableVideoH = 0;
+    flipVideoSampleX = true;
+    document.documentElement.classList.remove("ascii-booth-ios-selfie");
   }
 
   /**
-   * Uniform-scale the ASCII <pre> to fill the container (object-fit: contain).
-   * Grid is designed to match the container AR, so contain ≈ cover here.
+   * object-fit: cover — fill the mat uniformly; clip overflow (no letterboxing).
+   * Refine uses the same max() rule so analytical + measured stay consistent.
    */
   function coverAsciiInContainer(pre, container, colsOpt, rowsOpt) {
     if (!pre.textContent) return;
@@ -295,14 +334,13 @@
       const unitW = cols * r * lh;
       const unitH = rows * lh;
       if (unitW < 1e-6 || unitH < 1e-6) return;
-      let fs = Math.min(w / unitW, h / unitH);
+      let fs = Math.max(w / unitW, h / unitH) * 1.002;
       fs = Math.max(2, Math.min(96, fs));
       pre.style.fontSize = fs + "px";
-      /* Scroll-based correction for actual glyph metrics at this font size. */
       const sw = pre.scrollWidth;
       const sh = pre.scrollHeight;
       if (sw > 2 && sh > 2) {
-        const refine = Math.min(w / sw, h / sh);
+        const refine = Math.max(w / sw, h / sh);
         if (refine < 0.97 || refine > 1.03) {
           fs = Math.max(2, Math.min(96, fs * refine));
           pre.style.fontSize = fs + "px";
@@ -319,7 +357,7 @@
     const sw = pre.scrollWidth;
     const sh = pre.scrollHeight;
     if (sw < 1 || sh < 1) return;
-    let fs = testFs * Math.min(w / sw, h / sh);
+    let fs = testFs * Math.max(w / sw, h / sh) * 1.002;
     fs = Math.max(2, Math.min(96, fs));
     pre.style.fontSize = fs + "px";
   }
@@ -343,7 +381,52 @@
     return { cols: cols, rows: rows };
   }
 
-  function videoBufferSizePx(cols, rows) {
+  function computeGridSizeFromVideo(maxCols, maxRows) {
+    let vw = video.videoWidth;
+    let vh = video.videoHeight;
+    if (!vw || !vh) return null;
+
+    if (stableVideoW > 0 && stableVideoH > 0) {
+      const wJitter = Math.abs(vw - stableVideoW) / stableVideoW;
+      const hJitter = Math.abs(vh - stableVideoH) / stableVideoH;
+      const ar0 = stableVideoW / stableVideoH;
+      const ar1 = vw / vh;
+      const arJitter = Math.abs(ar1 - ar0) / ar0;
+      if (wJitter < 0.08 && hJitter < 0.08 && arJitter < 0.04) {
+        vw = stableVideoW;
+        vh = stableVideoH;
+      } else {
+        stableVideoW = vw;
+        stableVideoH = vh;
+      }
+    } else {
+      stableVideoW = vw;
+      stableVideoH = vh;
+    }
+
+    const r = getAsciiCellRatioWH();
+    let cols = maxCols;
+    let rows = Math.round(cols * (vh / vw) * r);
+    rows = Math.max(24, Math.min(rows, maxRows));
+    if (rows >= maxRows) {
+      rows = maxRows;
+      cols = Math.min(
+        maxCols,
+        Math.max(32, Math.round(rows / ((vh / vw) * r)))
+      );
+    }
+    cols = Math.max(32, Math.min(cols, maxCols));
+    return { cols: cols, rows: rows };
+  }
+
+  function videoBufferSizeFromVideoAspect(cols, vw, vh) {
+    return {
+      bufW: cols,
+      bufH: Math.max(1, Math.round((cols * vh) / vw)),
+    };
+  }
+
+  function videoBufferSizeFromGrid(cols, rows) {
     return { bufW: cols, bufH: Math.max(1, rows) };
   }
 
@@ -488,6 +571,9 @@
     x.font = "400 " + fontSize + "px " + fam;
     x.textBaseline = "top";
     const rampLen = RAMP.length - 1;
+    const mirrorX = document.documentElement.classList.contains(
+      "ascii-booth-ios-selfie"
+    );
     let t = 0;
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
@@ -502,7 +588,8 @@
         const idx = Math.round(dark * rampLen);
         const ch = RAMP.charAt(idx);
         x.fillStyle = "rgb(" + (rr | 0) + "," + (gg | 0) + "," + (bb | 0) + ")";
-        const px = col * cellW;
+        const drawCol = mirrorX ? cols - 1 - col : col;
+        const px = drawCol * cellW;
         const py = row * cellH;
         const yAdj = Math.max(0, (cellH - fontSize * 1.15) * 0.5);
         const mw = x.measureText(ch).width;
@@ -627,8 +714,10 @@
       sy = (vh - sh) / 2;
     }
     ctx.save();
-    ctx.translate(dw, 0);
-    ctx.scale(-1, 1);
+    if (flipVideoSampleX) {
+      ctx.translate(dw, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
     ctx.restore();
   }
@@ -661,9 +750,15 @@
   function renderAsciiFrame() {
     if (!cameraOn || !stream || video.readyState < 2) return;
 
-    const cw = viewfinderInner.clientWidth;
-    const ch = viewfinderInner.clientHeight;
-    const grid = computeGridForContainer(LIVE_COLS, LIVE_MAX_ROWS, cw, ch);
+    const narrow = isNarrowViewport();
+    let grid;
+    if (narrow) {
+      const cw = viewfinderInner.clientWidth;
+      const ch = viewfinderInner.clientHeight;
+      grid = computeGridForContainer(LIVE_COLS, LIVE_MAX_ROWS, cw, ch);
+    } else {
+      grid = computeGridSizeFromVideo(LIVE_COLS, LIVE_MAX_ROWS);
+    }
     if (!grid) return;
 
     const prevCols = lastCols;
@@ -673,7 +768,14 @@
     const gridDimsChanged =
       prevCols !== lastCols || prevRows !== lastRows;
 
-    const buf = videoBufferSizePx(grid.cols, grid.rows);
+    let buf;
+    if (narrow) {
+      buf = videoBufferSizeFromGrid(grid.cols, grid.rows);
+    } else {
+      const vw = stableVideoW || video.videoWidth;
+      const vh = stableVideoH || video.videoHeight;
+      buf = videoBufferSizeFromVideoAspect(grid.cols, vw, vh);
+    }
     workCanvas.width = buf.bufW;
     workCanvas.height = buf.bufH;
     drawVideoCover(buf.bufW, buf.bufH);
@@ -709,6 +811,19 @@
     rafId = requestAnimationFrame(tick);
   }
 
+  function attachStreamVideoListeners() {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+    track.onended = function () {
+      if (!cameraOn || viewfinderShowingPhoto) return;
+      stream = null;
+      video.srcObject = null;
+      cameraOn = false;
+      startCamera();
+    };
+  }
+
   async function resumeExistingStream() {
     if (!stream) return false;
     const live = stream.getTracks().some(function (t) {
@@ -723,6 +838,8 @@
     lastCols = 0;
     lastRows = 0;
     asciiLiveFitKey = "";
+    refreshIosMirrorState();
+    attachStreamVideoListeners();
     startLiveLoop();
     return true;
   }
@@ -776,6 +893,8 @@
         btnCapture.disabled = false;
         lastCols = 0;
         lastRows = 0;
+        refreshIosMirrorState();
+        attachStreamVideoListeners();
         startLiveLoop();
         return true;
       } catch (err) {
@@ -1026,18 +1145,16 @@
     }
   });
 
-  window.addEventListener("pagehide", function () {
-    stopLiveLoop();
-    if (stream) {
-      stream.getTracks().forEach(function (t) { t.stop(); });
-    }
-  });
-
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState !== "visible") return;
     if (viewfinderShowingPhoto) return;
     if (!cameraOn) return;
-    if (stream && stream.getTracks().some(function (t) { return t.readyState === "live"; })) {
+    const liveTrack =
+      stream &&
+      stream.getTracks().some(function (t) {
+        return t.readyState === "live";
+      });
+    if (liveTrack) {
       video.play().catch(function () {});
       if (!rafId) startLiveLoop();
     } else {
@@ -1050,11 +1167,35 @@
 
   window.addEventListener("pageshow", function (ev) {
     if (!ev.persisted) return;
-    stream = null;
-    video.srcObject = null;
-    cameraOn = false;
-    startCamera();
+    if (viewfinderShowingPhoto) return;
+    const liveTrack =
+      stream &&
+      stream.getTracks().some(function (t) {
+        return t.readyState === "live";
+      });
+    if (liveTrack) {
+      video.play().catch(function () {});
+      if (!rafId && cameraOn) startLiveLoop();
+    } else {
+      stream = null;
+      video.srcObject = null;
+      cameraOn = false;
+      startCamera();
+    }
   });
+
+  function onNarrowViewportChange() {
+    asciiLiveFitKey = "";
+    lastCols = 0;
+    lastRows = 0;
+    stableVideoW = 0;
+    stableVideoH = 0;
+  }
+  if (mqlNarrowViewport.addEventListener) {
+    mqlNarrowViewport.addEventListener("change", onNarrowViewportChange);
+  } else if (mqlNarrowViewport.addListener) {
+    mqlNarrowViewport.addListener(onNarrowViewportChange);
+  }
 
   let asciiLayoutRaf = 0;
   function scheduleAsciiLayoutFromResize() {
