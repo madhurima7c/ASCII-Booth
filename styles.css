@@ -58,6 +58,12 @@ body {
   box-sizing: border-box;
 }
 
+@media (min-width: 701px) {
+  .booth {
+    padding-bottom: calc(2.75rem + env(safe-area-inset-bottom));
+  }
+}
+
 .booth-header {
   margin-bottom: 1.25rem;
 }
@@ -84,8 +90,26 @@ body {
   color: #111;
 }
 
-.booth-header .back-meta-info-wrap {
+.booth-header .booth-info--mobile {
   flex-shrink: 0;
+}
+
+.booth-info--mobile {
+  display: none;
+}
+
+.booth-info--desktop {
+  display: inline-block;
+}
+
+@media (max-width: 700px) {
+  .booth-info--mobile {
+    display: inline-block;
+  }
+
+  .booth-info--desktop {
+    display: none !important;
+  }
 }
 
 .sr-only {
@@ -164,6 +188,24 @@ body {
   font-family: var(--font-capture);
   font-size: 14px;
   color: #9a9a9a;
+}
+
+@media (min-width: 701px) {
+  .booth-footer {
+    position: fixed;
+    z-index: 5;
+    left: max(1rem, env(safe-area-inset-left));
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    margin-top: 0;
+    padding-top: 0;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+
+  .booth-footer > * {
+    pointer-events: auto;
+  }
 }
 
 .viewfinder-flip-shell {
@@ -383,7 +425,9 @@ body {
   padding: 8px 10px;
   background: #ececec;
   color: #333;
+  font-family: var(--font-capture);
   font-size: 12px;
+  font-weight: 400;
   line-height: 1.35;
   letter-spacing: 0.02em;
   text-transform: none;
@@ -395,13 +439,13 @@ body {
   z-index: 10;
 }
 
-.booth-header .back-meta-tooltip {
+.booth-header .booth-info--mobile .back-meta-tooltip {
   left: auto;
   right: 0;
 }
 
 @media (max-width: 700px) {
-  .booth-header .back-meta-tooltip {
+  .booth-header .booth-info--mobile .back-meta-tooltip {
     top: calc(100% + 8px);
     bottom: auto;
   }

@@ -21,16 +21,16 @@
       <header class="booth-header">
         <div class="booth-header-row">
           <h1 class="booth-title">ASCII Booth</h1>
-          <span class="back-meta-info-wrap">
+          <span class="back-meta-info-wrap booth-info--mobile">
             <button
               type="button"
               class="back-meta-info-btn"
-              aria-describedby="back-info-tooltip"
+              aria-describedby="back-info-tooltip-mobile"
             >
               INFO
             </button>
             <span
-              id="back-info-tooltip"
+              id="back-info-tooltip-mobile"
               class="back-meta-tooltip"
               role="tooltip"
             >
@@ -236,6 +236,24 @@
       </div>
 
       <footer class="booth-footer">
+        <span class="back-meta-info-wrap booth-info--desktop">
+          <button
+            type="button"
+            class="back-meta-info-btn"
+            aria-describedby="back-info-tooltip-desktop"
+          >
+            INFO
+          </button>
+          <span
+            id="back-info-tooltip-desktop"
+            class="back-meta-tooltip"
+            role="tooltip"
+          >
+            Welcome to my tiny photobooth experiment. Your&nbsp;images are
+            processed temporarily and are&nbsp;never stored. Share it if you
+            like&nbsp;it!
+          </span>
+        </span>
         <a
           class="back-meta-site"
           href="https://madhurima.me"
