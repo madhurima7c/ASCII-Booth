@@ -59,6 +59,13 @@
   let lastRows = 0;
   let cachedCellRatioWH = null;
   let viewfinderShowingPhoto = false;
+  /** Ignore tiny mobile camera intrinsic-size jitter (reduces grid / font-size thrash). */
+  let stableVideoW = 0;
+  let stableVideoH = 0;
+  /** Skip redundant analytical refits when box + grid unchanged. */
+  let asciiLiveFitKey = "";
+  /** Prevent overlapping getUserMedia prompts (race on slow mobile). */
+  let cameraStartPromise = null;
 
   function getAsciiCellRatioWH() {
     if (cachedCellRatioWH !== null) {
@@ -266,6 +273,9 @@
     }
     btnCapture.textContent = "Capture";
     btnCapture.setAttribute("aria-label", "Capture ASCII portrait");
+    stableVideoW = 0;
+    stableVideoH = 0;
+    asciiLiveFitKey = "";
   }
 
   /**
@@ -284,6 +294,10 @@
     const cols = colsOpt != null ? colsOpt : 0;
     const rows = rowsOpt != null ? rowsOpt : 0;
     if (cols > 0 && rows > 0) {
+      const fitKey = w + "x" + h + "x" + cols + "x" + rows;
+      if (pre === asciiOut && fitKey === asciiLiveFitKey) {
+        return;
+      }
       const r = getAsciiCellRatioWH();
       const lh = 1.15;
       const unitW = cols * r * lh;
@@ -293,6 +307,9 @@
       let fs = scale * 1.002;
       fs = Math.max(2, Math.min(96, fs));
       pre.style.fontSize = fs + "px";
+      if (pre === asciiOut) {
+        asciiLiveFitKey = fitKey;
+      }
       return;
     }
 
@@ -309,9 +326,27 @@
   }
 
   function computeGridSizeFromVideo(maxCols, maxRows) {
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
+    let vw = video.videoWidth;
+    let vh = video.videoHeight;
     if (!vw || !vh) return null;
+
+    if (stableVideoW > 0 && stableVideoH > 0) {
+      const wJitter = Math.abs(vw - stableVideoW) / stableVideoW;
+      const hJitter = Math.abs(vh - stableVideoH) / stableVideoH;
+      const ar0 = stableVideoW / stableVideoH;
+      const ar1 = vw / vh;
+      const arJitter = Math.abs(ar1 - ar0) / ar0;
+      if (wJitter < 0.08 && hJitter < 0.08 && arJitter < 0.04) {
+        vw = stableVideoW;
+        vh = stableVideoH;
+      } else {
+        stableVideoW = vw;
+        stableVideoH = vh;
+      }
+    } else {
+      stableVideoW = vw;
+      stableVideoH = vh;
+    }
 
     const r = getAsciiCellRatioWH();
     let cols = maxCols;
@@ -661,19 +696,31 @@
     const grid = computeGridSizeFromVideo(LIVE_COLS, LIVE_MAX_ROWS);
     if (!grid) return;
 
-    if (grid.cols !== lastCols || grid.rows !== lastRows) {
-      lastCols = grid.cols;
-      lastRows = grid.rows;
-    }
+    const prevCols = lastCols;
+    const prevRows = lastRows;
+    lastCols = grid.cols;
+    lastRows = grid.rows;
+    const gridDimsChanged =
+      prevCols !== lastCols || prevRows !== lastRows;
 
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
+    const vw = stableVideoW || video.videoWidth;
+    const vh = stableVideoH || video.videoHeight;
     const buf = videoBufferSizePx(grid.cols, vw, vh);
     workCanvas.width = buf.bufW;
     workCanvas.height = buf.bufH;
     drawVideoCover(buf.bufW, buf.bufH);
     const imageData = ctx.getImageData(0, 0, buf.bufW, buf.bufH);
     asciiOut.innerHTML = frameToAscii(imageData, grid.cols, grid.rows, false);
+
+    if (asciiOut.textContent && lastCols > 0 && lastRows > 0) {
+      if (gridDimsChanged) {
+        asciiLiveFitKey = "";
+        coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
+      } else if (!asciiLiveFitKey) {
+        /* First frames: mat may be 0×0 until layout; retry until fit sticks. */
+        coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
+      }
+    }
   }
 
   function tick(now) {
@@ -685,9 +732,6 @@
     lastFrameTime = now;
     try {
       renderAsciiFrame();
-      if (asciiOut.textContent && lastCols > 0 && lastRows > 0) {
-        coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
-      }
     } finally {
       busy = false;
     }
@@ -698,47 +742,99 @@
     rafId = requestAnimationFrame(tick);
   }
 
+  async function resumeExistingStream() {
+    if (!stream) return false;
+    const live = stream.getTracks().some(function (t) {
+      return t.readyState === "live";
+    });
+    if (!live) return false;
+    video.srcObject = stream;
+    await video.play().catch(function () {});
+    cameraOn = true;
+    placeholder.classList.add("is-hidden");
+    btnCapture.disabled = false;
+    lastCols = 0;
+    lastRows = 0;
+    asciiLiveFitKey = "";
+    startLiveLoop();
+    return true;
+  }
+
   async function startCamera() {
-    clearError();
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showError(
-        "Camera needs HTTPS or localhost. Open this page from a local server."
-      );
-      return false;
-    }
-
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "user",
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
-      video.srcObject = stream;
-      await video.play().catch(function () {});
-      cameraOn = true;
-      placeholder.classList.add("is-hidden");
-      btnCapture.disabled = false;
-      lastCols = 0;
-      lastRows = 0;
-      startLiveLoop();
+    if (await resumeExistingStream()) {
       return true;
-    } catch (err) {
-      const name = err && err.name;
-      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        showError("Camera blocked. Allow access in your browser settings.");
-      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-        showError("No camera found.");
-      } else if (name === "NotReadableError" || name === "TrackStartError") {
-        showError("Camera is busy or unavailable.");
-      } else {
-        showError("Could not start the camera.");
-      }
-      return false;
     }
+
+    if (stream) {
+      const anyLive = stream.getTracks().some(function (t) {
+        return t.readyState === "live";
+      });
+      if (!anyLive) {
+        stream.getTracks().forEach(function (t) {
+          t.stop();
+        });
+        stream = null;
+        video.srcObject = null;
+      }
+    }
+
+    if (cameraStartPromise) {
+      return cameraStartPromise;
+    }
+
+    const attempt = (async function () {
+      clearError();
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showError(
+          "Camera needs HTTPS or localhost. Open this page from a local server."
+        );
+        return false;
+      }
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+        stableVideoW = 0;
+        stableVideoH = 0;
+        asciiLiveFitKey = "";
+        video.srcObject = stream;
+        await video.play().catch(function () {});
+        cameraOn = true;
+        placeholder.classList.add("is-hidden");
+        btnCapture.disabled = false;
+        lastCols = 0;
+        lastRows = 0;
+        startLiveLoop();
+        return true;
+      } catch (err) {
+        const name = err && err.name;
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          showError("Camera blocked. Allow access in your browser settings.");
+        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+          showError("No camera found.");
+        } else if (name === "NotReadableError" || name === "TrackStartError") {
+          showError("Camera is busy or unavailable.");
+        } else {
+          showError("Could not start the camera.");
+        }
+        return false;
+      }
+    })();
+
+    cameraStartPromise = attempt;
+    attempt.finally(function () {
+      if (cameraStartPromise === attempt) {
+        cameraStartPromise = null;
+      }
+    });
+    return attempt;
   }
 
   function closeSnapshot() {
@@ -966,6 +1062,23 @@
   });
 
   window.addEventListener("beforeunload", stopStream);
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible") return;
+    if (!stream || !cameraOn || viewfinderShowingPhoto) return;
+    video.play().catch(function () {});
+    if (!rafId) {
+      startLiveLoop();
+    }
+  });
+
+  window.addEventListener("pageshow", function (ev) {
+    if (!ev.persisted || !stream || !cameraOn || viewfinderShowingPhoto) return;
+    video.play().catch(function () {});
+    if (!rafId) {
+      startLiveLoop();
+    }
+  });
 
   let asciiLayoutRaf = 0;
   function scheduleAsciiLayoutFromResize() {
