@@ -232,6 +232,21 @@ body {
   background: var(--page-bg);
 }
 
+/*
+ * Mobile: 9:16 matches portrait 16:9 camera video (typical selfie stream), so
+ * drawVideoCover crops less → less “zoomed in.” Desktop keeps 3:4 (photo-booth).
+ */
+@media (max-width: 700px) {
+  .viewfinder-flip-shell,
+  .viewfinder {
+    aspect-ratio: 9 / 16;
+  }
+
+  .snapshot-frame {
+    aspect-ratio: 9 / 16;
+  }
+}
+
 /* Matches shadcn Button variant="outline" size="icon" (zinc-like tokens) */
 .btn-back-capture {
   flex-shrink: 0;
