@@ -389,7 +389,6 @@ body {
   opacity: 0;
   pointer-events: none;
   object-fit: cover;
-  transform: scaleX(-1);
 }
 
 .viewfinder-inner {

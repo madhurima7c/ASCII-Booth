@@ -59,39 +59,10 @@
   let lastRows = 0;
   let cachedCellRatioWH = null;
   let viewfinderShowingPhoto = false;
-  /** Ignore tiny mobile camera intrinsic-size jitter (reduces grid / font-size thrash). */
-  let stableVideoW = 0;
-  let stableVideoH = 0;
   /** Skip redundant analytical refits when box + grid unchanged. */
   let asciiLiveFitKey = "";
   /** Prevent overlapping getUserMedia prompts (race on slow mobile). */
   let cameraStartPromise = null;
-  /**
-   * Apply horizontal flip when sampling video into canvas (selfie parity).
-   * iPhone/iPad front-camera buffers are usually already mirrored; flipping
-   * again makes the frozen capture / download differ from the live ASCII.
-   */
-  let flipVideoSampleX = true;
-
-  function isLikelyAppleMobileDevice() {
-    const ua = navigator.userAgent || "";
-    if (/iPhone|iPod|iPad/i.test(ua)) return true;
-    if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) {
-      return true;
-    }
-    return false;
-  }
-
-  function refreshVideoSampleMirror() {
-    flipVideoSampleX = true;
-    if (!stream || !isLikelyAppleMobileDevice()) return;
-    const track = stream.getVideoTracks()[0];
-    if (!track || typeof track.getSettings !== "function") return;
-    const settings = track.getSettings();
-    if (settings.facingMode === "environment") return;
-    /* user, or omitted on Safari (still front selfie for this app) */
-    flipVideoSampleX = false;
-  }
 
   function getAsciiCellRatioWH() {
     if (cachedCellRatioWH !== null) {
@@ -299,18 +270,12 @@
     }
     btnCapture.textContent = "Capture";
     btnCapture.setAttribute("aria-label", "Capture ASCII portrait");
-    stableVideoW = 0;
-    stableVideoH = 0;
     asciiLiveFitKey = "";
-    flipVideoSampleX = true;
   }
 
   /**
-   * Uniform scale like CSS object-fit: cover — fills the container, preserves
-   * aspect ratio, clips overflow (no letterboxing, no non-uniform stretch).
-   * When cols & rows are passed, font size is derived from the grid geometry
-   * (stable on mobile). Measuring scrollWidth/scrollHeight each frame drifts
-   * with colored spans and triggers iOS resize loops (zoom / stretch).
+   * Uniform-scale the ASCII <pre> to fill the container (object-fit: contain).
+   * Grid is designed to match the container AR, so contain ≈ cover here.
    */
   function coverAsciiInContainer(pre, container, colsOpt, rowsOpt) {
     if (!pre.textContent) return;
@@ -330,10 +295,19 @@
       const unitW = cols * r * lh;
       const unitH = rows * lh;
       if (unitW < 1e-6 || unitH < 1e-6) return;
-      const scale = Math.max(w / unitW, h / unitH);
-      let fs = scale * 1.002;
+      let fs = Math.min(w / unitW, h / unitH);
       fs = Math.max(2, Math.min(96, fs));
       pre.style.fontSize = fs + "px";
+      /* Scroll-based correction for actual glyph metrics at this font size. */
+      const sw = pre.scrollWidth;
+      const sh = pre.scrollHeight;
+      if (sw > 2 && sh > 2) {
+        const refine = Math.min(w / sw, h / sh);
+        if (refine < 0.97 || refine > 1.03) {
+          fs = Math.max(2, Math.min(96, fs * refine));
+          pre.style.fontSize = fs + "px";
+        }
+      }
       if (pre === asciiOut) {
         asciiLiveFitKey = fitKey;
       }
@@ -345,60 +319,32 @@
     const sw = pre.scrollWidth;
     const sh = pre.scrollHeight;
     if (sw < 1 || sh < 1) return;
-
-    const scale = Math.max(w / sw, h / sh);
-    let fs = testFs * scale * 1.002;
+    let fs = testFs * Math.min(w / sw, h / sh);
     fs = Math.max(2, Math.min(96, fs));
     pre.style.fontSize = fs + "px";
   }
 
-  function computeGridSizeFromVideo(maxCols, maxRows) {
-    let vw = video.videoWidth;
-    let vh = video.videoHeight;
-    if (!vw || !vh) return null;
-
-    if (stableVideoW > 0 && stableVideoH > 0) {
-      const wJitter = Math.abs(vw - stableVideoW) / stableVideoW;
-      const hJitter = Math.abs(vh - stableVideoH) / stableVideoH;
-      const ar0 = stableVideoW / stableVideoH;
-      const ar1 = vw / vh;
-      const arJitter = Math.abs(ar1 - ar0) / ar0;
-      if (wJitter < 0.08 && hJitter < 0.08 && arJitter < 0.04) {
-        vw = stableVideoW;
-        vh = stableVideoH;
-      } else {
-        stableVideoW = vw;
-        stableVideoH = vh;
-      }
-    } else {
-      stableVideoW = vw;
-      stableVideoH = vh;
-    }
-
+  /**
+   * Compute grid dimensions to match the viewfinder container's aspect ratio
+   * (not the video's native AR). drawVideoCover crops the video to fit.
+   */
+  function computeGridForContainer(maxCols, maxRows, containerW, containerH) {
+    if (!containerW || !containerH) return null;
     const r = getAsciiCellRatioWH();
     let cols = maxCols;
-    let rows = Math.round(cols * (vh / vw) * r);
+    let rows = Math.round(cols * r * containerH / containerW);
     rows = Math.max(24, Math.min(rows, maxRows));
     if (rows >= maxRows) {
       rows = maxRows;
-      cols = Math.min(
-        maxCols,
-        Math.max(32, Math.round(rows / ((vh / vw) * r)))
-      );
+      cols = Math.round(rows * containerW / (r * containerH));
+      cols = Math.max(32, Math.min(cols, maxCols));
     }
     cols = Math.max(32, Math.min(cols, maxCols));
     return { cols: cols, rows: rows };
   }
 
-  /**
-   * Pixel buffer must match the camera aspect (vw/vh), not cols/rows. Using a
-   * cols×rows canvas makes each sample square while each monospace cell is
-   * wider than tall (cw/lh), which stretches the image vertically on screen.
-   */
-  function videoBufferSizePx(cols, vw, vh) {
-    const bufW = cols;
-    const bufH = Math.max(1, Math.round((cols * vh) / vw));
-    return { bufW: bufW, bufH: bufH };
+  function videoBufferSizePx(cols, rows) {
+    return { bufW: cols, bufH: Math.max(1, rows) };
   }
 
   function syncCaptureViewfinderTheme() {
@@ -681,10 +627,8 @@
       sy = (vh - sh) / 2;
     }
     ctx.save();
-    if (flipVideoSampleX) {
-      ctx.translate(dw, 0);
-      ctx.scale(-1, 1);
-    }
+    ctx.translate(dw, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
     ctx.restore();
   }
@@ -717,7 +661,9 @@
   function renderAsciiFrame() {
     if (!cameraOn || !stream || video.readyState < 2) return;
 
-    const grid = computeGridSizeFromVideo(LIVE_COLS, LIVE_MAX_ROWS);
+    const cw = viewfinderInner.clientWidth;
+    const ch = viewfinderInner.clientHeight;
+    const grid = computeGridForContainer(LIVE_COLS, LIVE_MAX_ROWS, cw, ch);
     if (!grid) return;
 
     const prevCols = lastCols;
@@ -727,9 +673,7 @@
     const gridDimsChanged =
       prevCols !== lastCols || prevRows !== lastRows;
 
-    const vw = stableVideoW || video.videoWidth;
-    const vh = stableVideoH || video.videoHeight;
-    const buf = videoBufferSizePx(grid.cols, vw, vh);
+    const buf = videoBufferSizePx(grid.cols, grid.rows);
     workCanvas.width = buf.bufW;
     workCanvas.height = buf.bufH;
     drawVideoCover(buf.bufW, buf.bufH);
@@ -741,7 +685,6 @@
         asciiLiveFitKey = "";
         coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
       } else if (!asciiLiveFitKey) {
-        /* First frames: mat may be 0×0 until layout; retry until fit sticks. */
         coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
       }
     }
@@ -780,7 +723,6 @@
     lastCols = 0;
     lastRows = 0;
     asciiLiveFitKey = "";
-    refreshVideoSampleMirror();
     startLiveLoop();
     return true;
   }
@@ -826,8 +768,6 @@
           },
           audio: false,
         });
-        stableVideoW = 0;
-        stableVideoH = 0;
         asciiLiveFitKey = "";
         video.srcObject = stream;
         await video.play().catch(function () {});
@@ -836,7 +776,6 @@
         btnCapture.disabled = false;
         lastCols = 0;
         lastRows = 0;
-        refreshVideoSampleMirror();
         startLiveLoop();
         return true;
       } catch (err) {
@@ -1087,27 +1026,39 @@
     }
   });
 
-  window.addEventListener("beforeunload", stopStream);
+  window.addEventListener("pagehide", function () {
+    stopLiveLoop();
+    if (stream) {
+      stream.getTracks().forEach(function (t) { t.stop(); });
+    }
+  });
 
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState !== "visible") return;
-    if (!stream || !cameraOn || viewfinderShowingPhoto) return;
-    video.play().catch(function () {});
-    if (!rafId) {
-      startLiveLoop();
+    if (viewfinderShowingPhoto) return;
+    if (!cameraOn) return;
+    if (stream && stream.getTracks().some(function (t) { return t.readyState === "live"; })) {
+      video.play().catch(function () {});
+      if (!rafId) startLiveLoop();
+    } else {
+      stream = null;
+      video.srcObject = null;
+      cameraOn = false;
+      startCamera();
     }
   });
 
   window.addEventListener("pageshow", function (ev) {
-    if (!ev.persisted || !stream || !cameraOn || viewfinderShowingPhoto) return;
-    video.play().catch(function () {});
-    if (!rafId) {
-      startLiveLoop();
-    }
+    if (!ev.persisted) return;
+    stream = null;
+    video.srcObject = null;
+    cameraOn = false;
+    startCamera();
   });
 
   let asciiLayoutRaf = 0;
   function scheduleAsciiLayoutFromResize() {
+    asciiLiveFitKey = "";
     if (asciiLayoutRaf) return;
     asciiLayoutRaf = requestAnimationFrame(function () {
       asciiLayoutRaf = 0;
