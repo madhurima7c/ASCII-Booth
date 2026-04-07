@@ -57,8 +57,6 @@
   let draggingHue = false;
   let lastCols = 0;
   let lastRows = 0;
-  let frameCount = 0;
-  let needsInitialFit = true;
   let cachedCellRatioWH = null;
   let viewfinderShowingPhoto = false;
 
@@ -268,18 +266,35 @@
     }
     btnCapture.textContent = "Capture";
     btnCapture.setAttribute("aria-label", "Capture ASCII portrait");
-    needsInitialFit = true;
   }
 
   /**
    * Uniform scale like CSS object-fit: cover — fills the container, preserves
    * aspect ratio, clips overflow (no letterboxing, no non-uniform stretch).
+   * When cols & rows are passed, font size is derived from the grid geometry
+   * (stable on mobile). Measuring scrollWidth/scrollHeight each frame drifts
+   * with colored spans and triggers iOS resize loops (zoom / stretch).
    */
-  function coverAsciiInContainer(pre, container) {
+  function coverAsciiInContainer(pre, container, colsOpt, rowsOpt) {
     if (!pre.textContent) return;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
+    const w = Math.round(container.clientWidth);
+    const h = Math.round(container.clientHeight);
     if (w < 10 || h < 10) return;
+
+    const cols = colsOpt != null ? colsOpt : 0;
+    const rows = rowsOpt != null ? rowsOpt : 0;
+    if (cols > 0 && rows > 0) {
+      const r = getAsciiCellRatioWH();
+      const lh = 1.15;
+      const unitW = cols * r * lh;
+      const unitH = rows * lh;
+      if (unitW < 1e-6 || unitH < 1e-6) return;
+      const scale = Math.max(w / unitW, h / unitH);
+      let fs = scale * 1.002;
+      fs = Math.max(2, Math.min(96, fs));
+      pre.style.fontSize = fs + "px";
+      return;
+    }
 
     const testFs = 16;
     pre.style.fontSize = testFs + "px";
@@ -500,7 +515,7 @@
     try {
       renderAsciiFrame();
       if (asciiOut.textContent) {
-        coverAsciiInContainer(asciiOut, viewfinderInner);
+        coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
       }
     } catch (err) {}
     if (!asciiOut.textContent || !lastCols || !lastRows) {
@@ -519,7 +534,12 @@
       captureAsciiOut.innerHTML = asciiOut.innerHTML;
     }
     if (captureViewfinderInner && captureAsciiOut) {
-      coverAsciiInContainer(captureAsciiOut, captureViewfinderInner);
+      coverAsciiInContainer(
+        captureAsciiOut,
+        captureViewfinderInner,
+        lastCols,
+        lastRows
+      );
     }
     let flipInDone = false;
     function finishFlipIn() {
@@ -644,7 +664,6 @@
     if (grid.cols !== lastCols || grid.rows !== lastRows) {
       lastCols = grid.cols;
       lastRows = grid.rows;
-      needsInitialFit = true;
     }
 
     const vw = video.videoWidth;
@@ -666,12 +685,8 @@
     lastFrameTime = now;
     try {
       renderAsciiFrame();
-      frameCount++;
-      if (needsInitialFit && asciiOut.textContent) {
-        coverAsciiInContainer(asciiOut, viewfinderInner);
-        needsInitialFit = false;
-      } else if (frameCount % 5 === 0) {
-        coverAsciiInContainer(asciiOut, viewfinderInner);
+      if (asciiOut.textContent && lastCols > 0 && lastRows > 0) {
+        coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
       }
     } finally {
       busy = false;
@@ -709,7 +724,6 @@
       btnCapture.disabled = false;
       lastCols = 0;
       lastRows = 0;
-      frameCount = 0;
       startLiveLoop();
       return true;
     } catch (err) {
@@ -734,7 +748,7 @@
       startLiveLoop();
       requestAnimationFrame(function () {
         if (asciiOut.textContent) {
-          coverAsciiInContainer(asciiOut, viewfinderInner);
+          coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
         }
       });
     }
@@ -953,19 +967,33 @@
 
   window.addEventListener("beforeunload", stopStream);
 
-  const ro = new ResizeObserver(function () {
-    if (cameraOn && asciiOut.textContent) {
-      coverAsciiInContainer(asciiOut, viewfinderInner);
-    }
-    if (
-      viewfinderShowingPhoto &&
-      captureAsciiOut &&
-      captureAsciiOut.textContent &&
-      captureViewfinderInner
-    ) {
-      coverAsciiInContainer(captureAsciiOut, captureViewfinderInner);
-    }
-  });
+  let asciiLayoutRaf = 0;
+  function scheduleAsciiLayoutFromResize() {
+    if (asciiLayoutRaf) return;
+    asciiLayoutRaf = requestAnimationFrame(function () {
+      asciiLayoutRaf = 0;
+      if (cameraOn && asciiOut.textContent && lastCols > 0 && lastRows > 0) {
+        coverAsciiInContainer(asciiOut, viewfinderInner, lastCols, lastRows);
+      }
+      if (
+        viewfinderShowingPhoto &&
+        captureAsciiOut &&
+        captureAsciiOut.textContent &&
+        captureViewfinderInner &&
+        lastCols > 0 &&
+        lastRows > 0
+      ) {
+        coverAsciiInContainer(
+          captureAsciiOut,
+          captureViewfinderInner,
+          lastCols,
+          lastRows
+        );
+      }
+    });
+  }
+
+  const ro = new ResizeObserver(scheduleAsciiLayoutFromResize);
   ro.observe(viewfinderInner);
   if (captureViewfinderInner) {
     ro.observe(captureViewfinderInner);
@@ -981,6 +1009,13 @@
     coverAsciiInContainer(snapshotAscii, snapshotInner);
   });
   roSnapshot.observe(snapshotInner);
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener(
+      "resize",
+      scheduleAsciiLayoutFromResize
+    );
+  }
 
   applyTheme("#000000");
 

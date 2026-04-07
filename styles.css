@@ -30,6 +30,11 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -395,6 +400,7 @@ body {
   bottom: var(--frame-mat-inset);
   z-index: 1;
   overflow: hidden;
+  overflow-anchor: none;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -417,6 +423,8 @@ body {
   background: transparent;
   user-select: none;
   display: block;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 .viewfinder-ascii span {
