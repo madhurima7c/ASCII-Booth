@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ASCII Booth</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="booth">
+      <header class="booth-header">
+        <h1 class="booth-title">ASCII Booth</h1>
+        <p class="booth-privacy sr-only">
+          Camera and images stay in your browser. Nothing is uploaded or saved.
+        </p>
+      </header>
+
+      <div class="booth-stack" id="booth-stack">
+        <div class="viewfinder-flip-shell">
+          <div class="viewfinder-flip-root" id="viewfinder-flip-root">
+            <div class="viewfinder-flip-inner" id="viewfinder-flip-inner">
+              <div class="viewfinder-face viewfinder-face--front">
+                <div
+                  id="viewfinder"
+                  class="viewfinder"
+                  style="--ascii-bg: #000000; --ascii-fg: #eeeeee"
+                  aria-live="polite"
+                >
+                  <video
+                    id="preview"
+                    class="camera-feed"
+                    playsinline
+                    muted
+                    autoplay
+                    aria-hidden="true"
+                  ></video>
+                  <div id="viewfinder-inner" class="viewfinder-inner">
+                    <pre id="ascii-out" class="viewfinder-ascii"></pre>
+                  </div>
+                  <p id="preview-placeholder" class="viewfinder-placeholder">
+                    Allow camera access to see your live ASCII portrait.
+                  </p>
+                  <p id="error-message" class="viewfinder-error" role="alert" hidden></p>
+                </div>
+              </div>
+              <div class="viewfinder-face viewfinder-face--back">
+                <div
+                  id="viewfinder-capture"
+                  class="viewfinder viewfinder--capture-back"
+                  aria-hidden="true"
+                >
+                  <div id="capture-viewfinder-inner" class="viewfinder-inner">
+                    <pre
+                      id="capture-ascii-out"
+                      class="viewfinder-ascii"
+                    ></pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="booth-result-dock" id="booth-result-dock">
+          <button
+            type="button"
+            id="btn-back-capture"
+            class="btn-back-capture"
+            aria-label="Back to live camera"
+          >
+            <!-- Lucide ArrowLeft (same paths as lucide-react / shadcn icon buttons) -->
+            <svg
+              class="btn-back-capture-icon"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="m12 19-7-7 7-7" />
+              <path d="M19 12H5" />
+            </svg>
+          </button>
+          <a
+            id="btn-download-capture"
+            class="btn-download-capture"
+            href="#"
+            download="ascii-booth.png"
+          >
+            DOWNLOAD IMAGE
+          </a>
+        </div>
+
+        <div class="booth-dock">
+          <div
+            class="swatches"
+            role="group"
+            aria-label="Background color"
+            id="swatch-group"
+          >
+            <button
+              type="button"
+              class="swatch"
+              data-preset="black"
+              data-color="#000000"
+              aria-pressed="true"
+              aria-label="Black background"
+              title="Black"
+            ></button>
+            <button
+              type="button"
+              class="swatch"
+              data-preset="yellow"
+              data-color="#e6c84a"
+              aria-pressed="false"
+              aria-label="Yellow background"
+              title="Yellow"
+            ></button>
+            <button
+              type="button"
+              class="swatch"
+              data-preset="blue"
+              data-color="#4a6fb5"
+              aria-pressed="false"
+              aria-label="Blue background"
+              title="Blue"
+            ></button>
+            <button
+              type="button"
+              class="swatch"
+              data-preset="red"
+              data-color="#c93636"
+              aria-pressed="false"
+              aria-label="Red background"
+              title="Red"
+            ></button>
+            <button
+              type="button"
+              class="swatch swatch-multicolor"
+              id="btn-multicolor"
+              data-preset="custom"
+              aria-pressed="false"
+              aria-expanded="false"
+              aria-controls="swatch-popover"
+              aria-label="Custom color swatch"
+              title="Custom color"
+            ></button>
+          </div>
+
+          <button
+            type="button"
+            id="btn-capture"
+            class="btn-capture"
+            disabled
+            aria-label="Capture ASCII portrait"
+          >
+            Capture
+          </button>
+
+          <div
+            id="swatch-popover"
+            class="swatch-popover"
+            hidden
+            role="dialog"
+            aria-label="Choose a custom background color"
+          >
+            <div class="swatch-popover-inner">
+              <p class="swatch-popover-label">Custom color</p>
+              <div class="swatch-picker">
+                <div class="swatch-sv-wrap">
+                  <canvas
+                    id="canvas-sv"
+                    class="swatch-canvas swatch-canvas-sv"
+                    width="220"
+                    height="180"
+                    aria-label="Saturation and brightness"
+                  ></canvas>
+                  <div
+                    id="sv-cursor"
+                    class="swatch-cursor"
+                    aria-hidden="true"
+                  ></div>
+                </div>
+                <div class="swatch-hue-wrap">
+                  <canvas
+                    id="canvas-hue"
+                    class="swatch-canvas swatch-canvas-hue"
+                    width="28"
+                    height="180"
+                    aria-label="Hue"
+                  ></canvas>
+                  <div
+                    id="hue-cursor"
+                    class="swatch-hue-cursor"
+                    aria-hidden="true"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="booth-footer">
+        <span class="back-meta-info-wrap">
+          <button
+            type="button"
+            class="back-meta-info-btn"
+            aria-describedby="back-info-tooltip"
+          >
+            INFO
+          </button>
+          <span
+            id="back-info-tooltip"
+            class="back-meta-tooltip"
+            role="tooltip"
+          >
+            Welcome to my tiny photobooth experiment. Your&nbsp;images are
+            processed temporarily and are&nbsp;never stored. Share it if you
+            like&nbsp;it!
+          </span>
+        </span>
+        <a
+          class="back-meta-site"
+          href="https://madhurima.me"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          MADHURIMA.ME
+        </a>
+      </footer>
+    </main>
+
+    <div
+      id="snapshot-modal"
+      class="snapshot-modal"
+      hidden
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="snapshot-title"
+    >
+      <div class="snapshot-backdrop"></div>
+      <div class="snapshot-panel">
+        <h2 id="snapshot-title" class="snapshot-title">Your capture</h2>
+        <p class="snapshot-hint">
+          Screenshot or share this window—nothing is saved by the app.
+        </p>
+        <div
+          id="snapshot-frame"
+          class="snapshot-frame"
+          style="--ascii-bg: #000000; --ascii-fg: #eeeeee"
+        >
+          <div id="snapshot-inner" class="snapshot-inner">
+            <pre id="snapshot-ascii" class="snapshot-ascii"></pre>
+          </div>
+        </div>
+        <button type="button" id="btn-snapshot-close" class="btn-snapshot-close">
+          Back to live
+        </button>
+      </div>
+    </div>
+
+    <canvas id="work-canvas" hidden aria-hidden="true"></canvas>
+
+    <script src="app.js"></script>
+  </body>
+</html>
