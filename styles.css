@@ -51,8 +51,7 @@ body {
   padding: 1.25rem 1rem 2rem;
   padding-left: max(1rem, env(safe-area-inset-left));
   padding-right: max(1rem, env(safe-area-inset-right));
-  /* Space for fixed footer (INFO + link row + safe area) */
-  padding-bottom: calc(2.75rem + env(safe-area-inset-bottom));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -63,8 +62,19 @@ body {
   margin-bottom: 1.25rem;
 }
 
+.booth-header-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
 .booth-title {
   margin: 0;
+  flex: 1;
+  min-width: 0;
   width: fit-content;
   max-width: 100%;
   font-family: "PP BitNeu", "Courier New", Courier, monospace;
@@ -72,6 +82,10 @@ body {
   font-weight: 700;
   letter-spacing: -0.03em;
   color: #111;
+}
+
+.booth-header .back-meta-info-wrap {
+  flex-shrink: 0;
 }
 
 .sr-only {
@@ -87,7 +101,6 @@ body {
 }
 
 .booth-stack {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -97,6 +110,12 @@ body {
   width: min(100%, var(--booth-column-width));
   max-width: 100%;
   box-sizing: border-box;
+}
+
+@media (min-width: 701px) {
+  .booth-stack {
+    flex: 1;
+  }
 }
 
 .booth-stack.is-capture-back .booth-dock {
@@ -125,27 +144,20 @@ body {
 }
 
 .booth-footer {
-  position: fixed;
-  z-index: 5;
-  left: max(1rem, env(safe-area-inset-left));
-  right: max(1rem, env(safe-area-inset-right));
-  bottom: max(1rem, env(safe-area-inset-bottom));
+  position: static;
+  margin-top: 2rem;
+  padding-top: 0.5rem;
+  align-self: stretch;
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  width: auto;
-  margin: 0;
-  padding: 0;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   font-family: var(--font-capture);
   font-size: 14px;
   color: #9a9a9a;
-  pointer-events: none;
-}
-
-.booth-footer > * {
-  pointer-events: auto;
 }
 
 .viewfinder-flip-shell {
@@ -372,6 +384,11 @@ body {
   pointer-events: none;
   transition: opacity 0.15s ease;
   z-index: 10;
+}
+
+.booth-header .back-meta-tooltip {
+  left: auto;
+  right: 0;
 }
 
 .back-meta-info-wrap:hover .back-meta-tooltip,

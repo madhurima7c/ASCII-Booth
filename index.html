@@ -19,7 +19,27 @@
   <body>
     <main class="booth">
       <header class="booth-header">
-        <h1 class="booth-title">ASCII Booth</h1>
+        <div class="booth-header-row">
+          <h1 class="booth-title">ASCII Booth</h1>
+          <span class="back-meta-info-wrap">
+            <button
+              type="button"
+              class="back-meta-info-btn"
+              aria-describedby="back-info-tooltip"
+            >
+              INFO
+            </button>
+            <span
+              id="back-info-tooltip"
+              class="back-meta-tooltip"
+              role="tooltip"
+            >
+              Welcome to my tiny photobooth experiment. Your&nbsp;images are
+              processed temporarily and are&nbsp;never stored. Share it if you
+              like&nbsp;it!
+            </span>
+          </span>
+        </div>
         <p class="booth-privacy sr-only">
           Camera and images stay in your browser. Nothing is uploaded or saved.
         </p>
@@ -216,24 +236,6 @@
       </div>
 
       <footer class="booth-footer">
-        <span class="back-meta-info-wrap">
-          <button
-            type="button"
-            class="back-meta-info-btn"
-            aria-describedby="back-info-tooltip"
-          >
-            INFO
-          </button>
-          <span
-            id="back-info-tooltip"
-            class="back-meta-tooltip"
-            role="tooltip"
-          >
-            Welcome to my tiny photobooth experiment. Your&nbsp;images are
-            processed temporarily and are&nbsp;never stored. Share it if you
-            like&nbsp;it!
-          </span>
-        </span>
         <a
           class="back-meta-site"
           href="https://madhurima.me"
